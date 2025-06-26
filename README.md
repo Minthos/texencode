@@ -1,6 +1,12 @@
 # texencode
 glsl compute shader for texture block compression
 
+RGBA 32 bits per pixel -> 6 bits per pixel
+
+16x16 blocks with 16 color palette per block
+
+compression runs in a few milliseconds on gpu, decompression is much quicker.
+
 input texture should be RGBA with power of 2 dimensions (must be divisible by 16 in both dimensions, I have only tested it with 512, 1024 and 2048 square textures)
 
 ```cpp
