@@ -1,6 +1,8 @@
 # texencode
 glsl compute shader for texture block compression
 
+input texture should be RGBA with power of 2 dimensions (must be divisible by 16 in both dimensions, I have only tested it with 512, 1024 and 2048 square textures)
+
 ```cpp
 
 void Renderer::compressTexture(GLuint inputTexture, GLuint outputBuffer, int width, int height) {
