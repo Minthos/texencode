@@ -8,8 +8,8 @@ const int BLOCK_SIZE = 16;
 const int PALETTE_SIZE = 16;
 
 shared vec4 palette[PALETTE_SIZE];
-shared uint candidates[64];
 shared vec4 candidateColors[64];
+shared float sCounts[16];
 
 float colorDistance(vec4 a, vec4 b) {
     vec4 diff = a - b;
@@ -44,8 +44,11 @@ void main() {
     }
     avg *= 0.0625; // Divide by 16
     vec4 c[4];
-    uint ci[4];
     c[0] = avg;
+    // initialize all the values in case every input pixel is identical to avoid glitching
+    c[1] = vec4(1.0, 0.0, 0.0, 1.0);
+    c[2] = vec4(0.0, 1.0, 0.0, 1.0);
+    c[3] = vec4(0.0, 0.0, 1.0, 1.0);
     float bestDist = 1e36;
     // First candidate is the pixel closest to the average
     for (uint y = 0; y < 4; y++) {
@@ -55,7 +58,6 @@ void main() {
             float d = colorDistance(lpixels[lidx], avg);
             if(d < bestDist) {
                 c[0] = lpixels[lidx];
-                ci[0] = idx;
                 bestDist = d;
             }
         }
@@ -74,26 +76,75 @@ void main() {
                 }
                 if(closestDist > bestDist) {
                     c[j] = lpixels[lidx];
-                    ci[j] = idx;
                     bestDist = closestDist;
                 }
             }
         }
     }
+    // one pass of k-means clustering
+    float counts[4];
+    vec4 averages[4];
     for(uint i = 0; i < 4; i++) {
-        candidates[localIdx * 4 + i] = ci[i] + yOffset + xOffset;
+        counts[i] = 0.0;
+        averages[i] = vec4(0);
+    }
+    for (uint y = 0; y < 4; y++) {
+        for (uint x = 0; x < 4; x++) {
+            uint idx = y * BLOCK_SIZE + x;
+            uint lidx = y * 4 + x;
+            float closestDist = 1e36;
+            uint closestIdx = 0;
+            vec4 closestColor = vec4(0);
+            for(uint k = 0; k < 4; k++) {
+                float d = colorDistance(lpixels[lidx], c[k]);
+                if(d < closestDist){
+                    closestDist = d;
+                    closestIdx = k;
+                    closestColor = lpixels[lidx];
+                }
+            }
+            counts[closestIdx]++;
+            averages[closestIdx] += closestColor;
+        }
+    }
+    float highestCount = 0;
+    uint highestIdx = 0;
+    for(uint i = 0; i < 4; i++) {
+        if(counts[i] > highestCount) {
+            highestCount = counts[i];
+            highestIdx = i;
+        }
+    }
+    c[0] = averages[highestIdx] / max(1.0, counts[highestIdx]);
+    sCounts[localIdx] = highestCount;
+    for(uint i = 0; i < 4; i++) {
         candidateColors[localIdx * 4 + i] = c[i];
     }
 
     barrier();
 
-    // Populate the palette
-    for(uint i = 0; i < 16; i++) {
-        float bestDist = 0.0;
-        uint winner = 0;
+    // keep the biggest cluster from each block of 8x8 pixels
+    if(localIdx < 4) {
+        uint heaviestIdx = 0;
+        float highestCount = 0.0;
+        for(uint y = 0; y < 2; y++){
+            for(uint x = 0; x < 2; x++){
+                uint idx = ((localIdx * 2) % 4) + ((localIdx / 2) * 8) + x + y * 4;
+                if(sCounts[idx] > highestCount){
+                    highestCount = sCounts[idx];
+                    heaviestIdx = idx;
+                }
+            }
+        }
+        palette[localIdx] = candidateColors[heaviestIdx * 4];
+    }
+
+    barrier();
+
+    for(uint i = 4; i < 16; i++) {
+        bestDist = 0.0;
         uint lwinner = 0;
         for(uint j = 0; j < 64; j++) {
-            uint idx = candidates[j];
             vec4 C = candidateColors[j];
             float closestDist = 1e36;
             for(uint k = 0; k < i; k++) {
@@ -101,7 +152,6 @@ void main() {
                 closestDist = min(closestDist, d);
             }
             if(closestDist > bestDist) {
-                winner = idx;
                 lwinner = j;
                 bestDist = closestDist;
             }
@@ -109,7 +159,8 @@ void main() {
         palette[i] = candidateColors[lwinner];
     }
 
-    uint indices[PALETTE_SIZE];
+    // assign colors to pixels
+    uint indices[16];
     for(uint y = 0; y < 4; y++) {
         for(uint x = 0; x < 4; x++) {
             uint lidx = y * 4 + x;
@@ -144,4 +195,3 @@ void main() {
     data[byteOffset + 16 + localIdx * 2] = index1;
     data[byteOffset + 17 + localIdx * 2] = index2;
 }
-
